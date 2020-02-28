@@ -249,7 +249,6 @@ public class MainWatcher
                         }
                     }
                     
-                    
                 }
                 
                 line = buffRead.readLine();
