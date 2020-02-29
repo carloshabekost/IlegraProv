@@ -21,6 +21,10 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 
 /**
@@ -117,7 +121,7 @@ public class MainWatcher
                         // Output
                         System.out.println( "New path created: " + newPath );
                         
-                        registerPath( newPath );
+                        registerPath( path );
                     } 
                     else if ( kind == StandardWatchEventKinds.ENTRY_MODIFY ) 
                     {
@@ -128,7 +132,7 @@ public class MainWatcher
                         
                         Path child = path.resolve( newPath );
                         
-                        registerPath( child );
+                        registerPath( path );
                     }
                     else if ( kind == StandardWatchEventKinds.ENTRY_DELETE ) 
                     {
@@ -159,11 +163,7 @@ public class MainWatcher
      * @throws IOException 
      */
     private static void registerPath( Path path ) throws IOException
-    {
-        //Stream<String> lines = Files.lines( path );  
-        //String data = lines.collect( Collectors.joining("\n") );
-        //String[] datas = data.split( "\n" );
-        
+    {        
         Path outp = Paths.get( PATH_OUT );
                 
         //Verify output folder
@@ -187,92 +187,133 @@ public class MainWatcher
             
             return;
         }
-                
-        BufferedReader buffRead = new BufferedReader( new FileReader( path.toString() ) );
+            
+        //Hash for saving the total of sales, by Salesman
+        HashMap<String,Float> totalSa = new HashMap<>();
         
-        if ( buffRead.ready() )
+        //Save all cpfs and cnpj for avoid duplicates.
+        ArrayList<String> cpfs = new ArrayList<>();
+        ArrayList<String> cnpj = new ArrayList<>();
+        
+        //Save ID of the most expensive sale
+        float maxSale = -1;
+        String idSale = "";
+        
+        File dir = new File( path.toUri() );        
+        File[] files = dir.listFiles();
+        
+        //Get all files from diretory "in"
+        for ( File file : files )
         {
-            String line = buffRead.readLine();
+            BufferedReader buffRead = new BufferedReader( new FileReader( file ) );
             
-            //Accountant for Salesman and customer
-            int countCustumer = 0;
-            int countSalesman = 0;
-            
-            float maxSale = -1;
-            String idSale = "";
-            
-            float minSale = -1;
-            String name = "";
-            
-            //Hash for saving the total of sales, by Salesman
-            HashMap<String,Float> totalSa = new HashMap<>();
-            
-            while( line != null )
+            if ( buffRead.ready() )
             {
-                String[] content = line.split( "ç" );
-                
-                if ( line.startsWith( "001" ) ) //Salesmen
+                String line = buffRead.readLine();
+
+                while( line != null )
                 {
-                    countSalesman++;
-                }
-                else if ( line.startsWith( "002" ) ) //Costumer
-                {
-                    countCustumer++;
-                }
-                else if ( line.startsWith( "003" ) ) //Sale
-                {                    
-                    //Get a list of sales, removing "[]" caracters and split by ","
-                    String[] sales = content[2].replace( "[", "" ).replace( "]", "").split( "," ); 
-                    
-                    float sub = 0;
-                    
-                    for ( String sale : sales )
+                    String[] content = line.split( "ç" );
+
+                    if ( line.startsWith( "001" ) ) //Salesmen
                     {
-                        String[] item = sale.split( "-" );
-                        
-                        sub += Float.valueOf( item[2] );
-                    }
-                    
-                    //Verify the most expensive sale
-                    if ( maxSale < sub )
-                    {
-                        maxSale = sub;                        
-                        idSale = content[1]; //1 - SALE ID
-                    }
-                    else                    
-                    {
-                        //Verify the worst salesman
-                        if ( minSale == -1 || minSale > sub )
+                        if ( !cpfs.contains( content[1] ) )  //Position 1 has the CPF
                         {
-                            minSale = sub;
-                            name = content[3]; //1 - Salasman name
+                            cpfs.add( content[1] );
                         }
                     }
-                    
-                }
-                
-                line = buffRead.readLine();
-            }
-            
-            buffRead.close(); //Close file from in
-            
-            //Prepare content for report
-            //String lenght is 4:
-            //1: Amount of costumers; 
-            //2: Amount of Salemen; 
-            //3: ID most expensive sale
-            //4: The worst saleman
-            String[] report = new String[4]; 
-            report[0] = "Amount of Costumers: " + countCustumer;
-            report[1] = "Amount of Salesmen: " + countSalesman;
-            report[2] = "ID the Most Expensive Sale: " + idSale + " Value: " + maxSale;
-            report[3] = "Name of the worst salesman: " + name + ". Value of Sale: " + minSale;
-            
-            updateReport( report );
-        }
-       
-    }
+                    else if ( line.startsWith( "002" ) ) //Costumer
+                    {
+                        if ( !cnpj.contains( content[1] ) )  //Position 1 has the CNPJ
+                        {
+                            cnpj.add( content[1] );
+                        }
+                    }
+                    else if ( line.startsWith( "003" ) ) //Sale
+                    {        
+                        String name = content[3];
+                        float current = 0;                        
 
+                        //Verify if there is another sale for the salesman....
+                        //If exists, then upadate de total. 
+                        //
+                        float sub = ( totalSa.get( name ) == null ) ? 0 : totalSa.get( name );                    
+
+                        //Get a list of sales, removing "[]" caracters and split by ","
+                        String[] sales = content[2].replace( "[", "" ).replace( "]", "").split( "," ); 
+
+                        //Sum of total sales
+                        //Also sum the total of current sale;
+                        for ( String sale : sales )
+                        {
+                            String[] item = sale.split( "-" );
+
+                            sub += Float.valueOf( item[2] );
+                            current += Float.valueOf( item[2] );
+                        }
+                        
+                        //Update or put the name of salesman with the total of sales
+                        if ( totalSa.containsKey( name ) )
+                            totalSa.replace( name, sub );
+                        else
+                            totalSa.put( name, sub );
+                        
+                        //Verify the most expensive sale
+                        if ( maxSale < current )
+                        {
+                            maxSale = current;                        
+                            idSale = content[1]; //1 = SALE ID
+                        }
+                    }
+                
+                    line = buffRead.readLine(); //Read next line
+                }            
+
+                buffRead.close(); //Close the file            
+            }                   
+                     
+        }
+        
+        //After list all files, we build the report content
+
+        float minSale = -1;
+        String name = "";
+        
+        //Get the worst salesman
+        for ( String key : totalSa.keySet() )
+        {
+            //Gets the total of sales of a salesman
+            float current = totalSa.get( key );
+            
+            //Verifies if the current sale is less than min registred
+            if ( minSale == -1 || minSale > current )
+            {
+                minSale = current;
+                name = key;
+            }             
+        }
+        
+        DateFormat dateFormat = new SimpleDateFormat( "dd/MM/yyyy HH:mm:ss" );
+        
+        //First, we prepare content for report
+        //String lenght is 4:
+        //1: Amount of costumers; 
+        //2: Amount of Salemen; 
+        //3: ID most expensive sale
+        //4: The worst saleman   
+        String[] report = new String[7];
+        report[0] = "Relátorio de Vendas Loja XXXXX";
+        report[1] = "Data/Hora da Verificação: " + dateFormat.format( new Date() );
+        report[2] = "Total de Arquivos Verificados: " + dir.listFiles().length;
+        report[3] = "Quantidade de clientes: " + cnpj.size();
+        report[4] = "Quantidade de vendedores: " + cpfs.size();
+        report[5] = "ID da Venda Mais cara: " + idSale + " Valor: " + maxSale;
+        report[6] = "Pior vendedor: " + name + ". Valor Total de Vendas: " + minSale;
+            
+        updateReport( report );
+    }
+    
+    
     public static boolean updateReport( String[] content )
     {
         boolean updated = false;
@@ -285,10 +326,6 @@ public class MainWatcher
             if ( !file.exists() ) //If does not exists, than creat the file...
             {
                 new File( PATH_OUT + "\\Report.txt" ).createNewFile();
-            }
-            else //TODO: Get the current data....
-            {
-                
             }
             
             BufferedWriter buffFile = new BufferedWriter( new FileWriter( PATH_OUT + "\\Report.txt" ) );
