@@ -29,11 +29,11 @@ import java.util.HashMap;
 
 /**
  *
- * @author cfsan
+ * @author Carlos Habekost
  */
-public class MainWatcher 
+public class WatcherDirectory 
 {
-    //Pathes used in this class...
+    //Paths used in this class...
     private static final String PATH_IN = "C:\\data\\in";
     private static final String PATH_OUT = "C:\\data\\out";
     
@@ -43,15 +43,27 @@ public class MainWatcher
      */
     public static void main( String[] args )
     {
-        // Folder to watch
-        File dir = new File( PATH_IN );
+        // Dir to watch
+        File dir;
+        
+        if( args.length == 0 )
+        {
+            dir = new File( PATH_IN );  
+        }
+        else
+        {
+            dir = new File( args[0] );
+        }
         
         watchDirectoryPath( dir.toPath() );
     }
-           
+
     /**
+     * Watch a directory. Whenever an insert, modify or delete occurs, 
+     * the report is updated.
      * 
      * @param path 
+     * a directory path to be watched.
      */
     public static void watchDirectoryPath( Path path ) 
     {
@@ -64,7 +76,6 @@ public class MainWatcher
             
             if ( !isFolder ) 
             {
-                //throw new IllegalArgumentException( "Path: " + path + " is not a folder" );
                 System.err.println( "Path: " + path + " is not a folder" );
                 
                 return;
@@ -74,12 +85,14 @@ public class MainWatcher
         {
             System.out.println( "Folder does not exists" );
             
-            //ioe.printStackTrace();
             System.err.println( ioe );
             
             return;
         }
 
+        //When load, generates a report from current files
+        verifyFiles( path );
+        
         System.out.println( "Watching path: " + path );
 
         // We obtain the file system of the Path
@@ -95,51 +108,25 @@ public class MainWatcher
                           StandardWatchEventKinds.ENTRY_MODIFY, 
                           StandardWatchEventKinds.ENTRY_DELETE ); 
 
-            // Start the infinite polling loop
-            //WatchKey key = null;
-            
+            // Start the infinite polling loop            
             while ( true ) 
             {
                 WatchKey key = service.take();
 
                 // Dequeueing events
-                //Kind<?> kind = null;
                 for ( WatchEvent<?> watchEvent : key.pollEvents() ) 
                 {
                     // Get the type of the event
                     WatchEvent.Kind<?> kind = watchEvent.kind();
-                    
-//                    if ( StandardWatchEventKinds.OVERFLOW == kind ) 
-//                    {
-//                        continue; // loop
-//                        
-//                    } 
-                    if ( kind == StandardWatchEventKinds.ENTRY_CREATE ) 
-                    {
-                        // A new Path was created
-                        Path newPath = ((WatchEvent<Path>) watchEvent).context();
-                        // Output
-                        System.out.println( "New path created: " + newPath );
+
+                    //For any event that may occur with a file, the report is updated                    
+                    if ( kind == StandardWatchEventKinds.ENTRY_CREATE ||
+                         kind == StandardWatchEventKinds.ENTRY_MODIFY ||
+                         kind == StandardWatchEventKinds.ENTRY_DELETE ) 
+                    { 
+                        System.out.println( "A new action occured in Path... Updating the report" );
                         
-                        registerPath( path );
-                    } 
-                    else if ( kind == StandardWatchEventKinds.ENTRY_MODIFY ) 
-                    {
-                        // modified
-                        Path newPath = ((WatchEvent<Path>) watchEvent).context();
-                        // Output
-                        System.out.println( "New path modified: " + newPath );
-                        
-                        Path child = path.resolve( newPath );
-                        
-                        registerPath( path );
-                    }
-                    else if ( kind == StandardWatchEventKinds.ENTRY_DELETE ) 
-                    {
-                        // Deleted
-                        Path newPath = ((WatchEvent<Path>) watchEvent).context();
-                        // Output
-                        System.out.println( "New path deleted: " + newPath );
+                        verifyFiles( path );
                     }
                 }
 
@@ -158,11 +145,13 @@ public class MainWatcher
     }
 
     /**
+     * Verifies the files in <i>path</i>, updating the report
      * 
      * @param path
+     * the path to the files
      * @throws IOException 
      */
-    private static void registerPath( Path path ) throws IOException
+    private static void verifyFiles( Path path )
     {        
         Path outp = Paths.get( PATH_OUT );
                 
@@ -205,73 +194,75 @@ public class MainWatcher
         //Get all files from diretory "in"
         for ( File file : files )
         {
-            BufferedReader buffRead = new BufferedReader( new FileReader( file ) );
-            
-            if ( buffRead.ready() )
+            try ( BufferedReader buffRead = new BufferedReader( new FileReader( file ) ) )
             {
-                String line = buffRead.readLine();
-
-                while( line != null )
+                if ( buffRead.ready() )
                 {
-                    String[] content = line.split( "ç" );
+                    String line = buffRead.readLine();
 
-                    if ( line.startsWith( "001" ) ) //Salesmen
+                    while( line != null )
                     {
-                        if ( !cpfs.contains( content[1] ) )  //Position 1 has the CPF
+                        String[] content = line.split( "ç" );
+
+                        if ( line.startsWith( "001" ) ) //Salesmen
                         {
-                            cpfs.add( content[1] );
+                            if ( !cpfs.contains( content[1] ) )  //Position 1 has the CPF
+                            {
+                                cpfs.add( content[1] );
+                            }
                         }
-                    }
-                    else if ( line.startsWith( "002" ) ) //Costumer
-                    {
-                        if ( !cnpj.contains( content[1] ) )  //Position 1 has the CNPJ
+                        else if ( line.startsWith( "002" ) ) //Costumer
                         {
-                            cnpj.add( content[1] );
+                            if ( !cnpj.contains( content[1] ) )  //Position 1 has the CNPJ
+                            {
+                                cnpj.add( content[1] );
+                            }
                         }
-                    }
-                    else if ( line.startsWith( "003" ) ) //Sale
-                    {        
-                        String name = content[3];
-                        float current = 0;                        
+                        else if ( line.startsWith( "003" ) ) //Sale
+                        {        
+                            String name = content[3];
+                            float current = 0;                        
 
-                        //Verify if there is another sale for the salesman....
-                        //If exists, then upadate de total. 
-                        //
-                        float sub = ( totalSa.get( name ) == null ) ? 0 : totalSa.get( name );                    
+                            //Verify if there is another sale for the salesman....
+                            //If exists, then upadate de total. 
+                            //
+                            float sub = ( totalSa.get( name ) == null ) ? 0 : totalSa.get( name );                    
 
-                        //Get a list of sales, removing "[]" caracters and split by ","
-                        String[] sales = content[2].replace( "[", "" ).replace( "]", "").split( "," ); 
+                            //Get a list of sales, removing "[]" caracters and split by ","
+                            String[] sales = content[2].replace( "[", "" ).replace( "]", "").split( "," ); 
 
-                        //Sum of total sales
-                        //Also sum the total of current sale;
-                        for ( String sale : sales )
-                        {
-                            String[] item = sale.split( "-" );
+                            //Sum of total sales
+                            //Also sum the total of current sale (for identifying the most expensive sale);
+                            for ( String sale : sales )
+                            {
+                                String[] item = sale.split( "-" );
 
-                            sub += Float.valueOf( item[2] );
-                            current += Float.valueOf( item[2] );
+                                sub += Float.valueOf( item[2] );
+                                current += Float.valueOf( item[2] );
+                            }
+
+                            //Update or put the name of salesman with the total of sales
+                            if ( totalSa.containsKey( name ) )
+                                totalSa.replace( name, sub );
+                            else
+                                totalSa.put( name, sub );
+
+                            //Verify the most expensive sale
+                            if ( maxSale < current )
+                            {
+                                maxSale = current;                        
+                                idSale = content[1]; //1 = SALE ID
+                            }
                         }
-                        
-                        //Update or put the name of salesman with the total of sales
-                        if ( totalSa.containsKey( name ) )
-                            totalSa.replace( name, sub );
-                        else
-                            totalSa.put( name, sub );
-                        
-                        //Verify the most expensive sale
-                        if ( maxSale < current )
-                        {
-                            maxSale = current;                        
-                            idSale = content[1]; //1 = SALE ID
-                        }
-                    }
-                
-                    line = buffRead.readLine(); //Read next line
-                }            
 
-                buffRead.close(); //Close the file            
-            }                   
-                     
+                        line = buffRead.readLine(); //Read next line
+                    }            
+
+                    buffRead.close(); //Close the file            
+                } 
+            }
+            catch( IOException ioe )    {        }           
+                 
         }
         
         //After list all files, we build the report content
@@ -302,19 +293,26 @@ public class MainWatcher
         //3: ID most expensive sale
         //4: The worst saleman   
         String[] report = new String[7];
-        report[0] = "Relátorio de Vendas Loja XXXXX";
+        report[0] = "Relátorio de Vendas Loja Bom Preço";
         report[1] = "Data/Hora da Verificação: " + dateFormat.format( new Date() );
         report[2] = "Total de Arquivos Verificados: " + dir.listFiles().length;
         report[3] = "Quantidade de clientes: " + cnpj.size();
         report[4] = "Quantidade de vendedores: " + cpfs.size();
         report[5] = "ID da Venda Mais cara: " + idSale + " Valor: " + maxSale;
-        report[6] = "Pior vendedor: " + name + ". Valor Total de Vendas: " + minSale;
+        report[6] = "Pior vendedor: " + name;
             
-        updateReport( report );
+        updateReportFile( report );
     }
     
-    
-    public static boolean updateReport( String[] content )
+    /**
+     * Update the Report File with a vector String of content.
+     * If there is no report file, then the file is created.
+     * 
+     * @param content
+     * a String vector with the report content
+     * @return 
+     */
+    public static boolean updateReportFile( String[] content )
     {
         boolean updated = false;
         
